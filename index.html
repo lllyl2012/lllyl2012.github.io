@@ -1,1 +1,138 @@
-111111
+	solr在一台机器上集群部署流程
+					
+	环境配置
+（jdk1.7；  tomcat7.0；   solr5.2.0；  zookeeper3.4.10）
+一、solr的single搭建
+	大神朱小杰的教程，强烈推荐！！！
+	http://www.cnblogs.com/zhuxiaojie/p/5764680.html
+二、solr集群搭建
+注意：该教程默认各位已经完成了single搭建，请在其基础上继续
+zookeeper集群
+1、下载，解压出三个zookeeper目录,分别为zookeeper01, zookeeper02, zookeeper03
+1、	给每个目录配置
+a)	zookeeper目录下创建 data
+b)	data 下创建文件 myid（纯文件，无后缀）
+c)	记事本打开，在myid里写入1（2或3，是第几个zookeeper就写几）
+d)	进入目录下的 conf
+e)	修改 zoo_sample.cfg  名字为 zoo.cfg
+f)	编辑zoo.cfg  : datadir = data文件夹的完整路径
+g)	编辑zoo.cfg : clientPort = 2181
+h)	编辑zoo.cfg:  server.1 = 127.0.0.1:2881:3881
+(两个端口分别用作zookeeper内部通信和投票)
+i.	server.2= 127.0.0.1:2882:3882
+ii.	server.3 = 127.0.0.1:2883:3883
+另外两台同理，clientPort改成不同的就行
+ 
+3、启动三台zookeeper 	linux:	bin/zkServer.sh start
+					window下直接点击zkServer.cmd
+	(ps:如果运行报错，用记事本打开它，在最后一行加入"pause"一条指令就可以看到报错信息；在三台zookeeper全部启动前，已启动的zookeeper会一直报错，提示无法连接到没启动的那几台）
+4、（linux下自己编写start-all.sh 批处理启动，就不用看这么多错误信息了）
+5、（linux 下bin/zkServer.sh  status分别查看每台服务器状态）
+
+
+
+Tomcat集群
+
+1、下载并解压出4个tomcat目录,分别为tomcat01, tomcat02, tomcat03, tomcat04
+2、这一步作废
+3、conf/server.xml中修改里面的三个端口号
+ 
+ 
+ 
+这三个port改成其他的也可以，反正四个tomcat不要重复
+4、创建4个solrHome目录，分别为solrHome01, solrHome02, solrHome03, solrHome04
+然后我的目录就成了这个样子
+ 
+5、在每一个tomcat/webapps/solr/WEB-INF/web.xml中，都加上
+	<env-entry>
+		<env-entry-name>solr/home</env-entry-name>
+		<env-entry-value>对应solrHome文件夹的路径</env-entry-value>
+		<env-entry-type>java.lang.String</env-entry-type>
+	</env-entry>
+
+6.solrHome目录下修改solr.xml 的当前solrHome的对应tomcat的host  的ip地址和hostPort端口号
+ 
+7、修改tomcat/bin/catalina.sh文件中的内容，如下
+	Java_opts=”-DzkHost=192.168.25.163:2181,192.168.25.163:2182,192.168.25.163:2183”
+
+	每个tomcat都改一遍
+windows下是catalina.bat
+
+
+然后在任意一个solrhome下创建一个文件夹“collection1”，从\solr\server\solr\configsets下把"basic_configs/conf"文件拷贝到collection1下(注意，有一个solrHome创建了就可以)，自己根据需要修改里面的配置
+
+然后把配置文件conf上传到zookeeper，方法如下
+11、
+到solr客户端下 solr/example/scripts/cloud-scripts/zkcli.sh
+12、
+./zkcli.sh   -zkhost    127.0.0.1:2181, 127.0.0.1:2182, 127.0.0.1:2183   -cmd  upconfig  -confdir    D:\solrCloud\solrHome01\collection1\conf   -confname  myconf
+（Windows是用zkcli.bat执行）
+
+13、进入zookeeper01目录
+Bin/zkCli.sh  回车就能连上，默认2181
+
+	或链接指定端口zookeeper
+	zkCli.sh  -server  192.168.25.163:2182
+（windows下zkCli.cmd）
+14、刚才上传的配置在configs/myconf
+
+15、启动4个tomcat
+	tomcat/bin/startup.bat或startup.sh
+16、查看tomcat是否启动
+	Tomcat/log/catalina.out日志文件
+	(直接登网站)
+分片
+17、登陆solr网站cloud点进去graph
+     4个站点各自创建core，指向collection1,然后在cloud/Graph中查看链接状态
+ 
+18、分片，在网址中输入: 127.0.0.1:8180/solr/admin/collections?action=CREATE&name=collection2&numShards=2&replicationFactor=2
+19、删除不要的collections:
+127.0.0.1:8180/solr/admin/collections?action=DELETE&name=collection1
+
+
+ps：请使用网上下载的原生版tomcat，不要“访问地址不用带项目名"的那种。
+	或者把已有的tomcat中的server.xml中<HOST>标签中的<context>删除
+
+
+
+
+三、solr分词
+这里使用的是mmseg4j 分词，该jar包网上下载的普遍有问题，不能正常使用。经测试，该版本可以，下载地址： http://download.csdn.net/detail/u012385190/9550326; 
+1、将文件里的jar包拷贝到Tomcat\webapps\solr\WEB-INF\lib下； 
+2、在 solrhome\目录下新建一个 dic 文件夹 , 把 新下载的词库（data文件夹下的那几个文件，别把data文件夹拷过去）拷贝到 dic 目录下； 
+3、在 D:\testsolr\solr_home\solr\my_core\conf\schema.xml 文件的里添加如下:
+<fieldtype name="textComplex" class="solr.TextField" positionIncrementGap="100">
+        <analyzer>
+            <tokenizer class="com.chenlb.mmseg4j.solr.MMSegTokenizerFactory" mode="complex" dicPath="D:/testsolr/solr_home/dic">
+            </tokenizer>
+        </analyzer>
+    </fieldtype>
+    <fieldtype name="textMaxWord" class="solr.TextField" positionIncrementGap="100">
+        <analyzer>
+            <tokenizer class="com.chenlb.mmseg4j.solr.MMSegTokenizerFactory" mode="maxword" dicPath="D:/testsolr/solr_home/dic">
+            </tokenizer>
+        </analyzer>
+    </fieldtype>
+    <fieldtype name="textSimple" class="solr.TextField" positionIncrementGap="100">
+        <analyzer>
+            <tokenizer class="com.chenlb.mmseg4j.solr.MMSegTokenizerFactory" mode="simple" dicPath="D:/testsolr/solr_home/dic">
+            </tokenizer>
+        </analyzer>
+    </fieldtype>
+•	1
+•	2
+这里不同的name选用不同的分词方式； 
+其中dicPath属性的值为第二步的地址； 
+4、在 D:\testsolr\solr_home\solr\my_core\conf\schema.xml 文件里修改或添加如下 :
+    <field name="name" type="textMaxWord" indexed="true" stored="true" multiValued="true" />
+    <field name="description" type="textMaxWord" indexed="true" stored="true" multiValued="true" />
+•	1
+•	2
+5、开启服务如下进行分词测试，如下图分词： 
+ 
+如下图所示root字段是没有分词的结果： 
+  
+在过程中出现如下错误，是因为字段重复，在schema.xml中将另一个content字段的配置注释掉即可(name同理)。 
+ 
+6、如此，分词ok
+
